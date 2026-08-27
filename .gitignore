@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+streaming_log.csv
+baseline_log.csv
+adaptive_log.csv
+stage1_results.csv
+
+yolo11n.pt
+
+adaptive_client_backup.py
+
+.env

@@ -5,7 +5,13 @@ import cv2
 import time
 from ultralytics import YOLO
 from logger import initialize_log, log_event
-initialize_log("baseline_log.csv")
+initialize_log(
+    os.path.join(
+        PROJECT_ROOT,
+        "results",
+        "streaming_log.csv"
+    )
+)
 # ============================================================
 # NETWORK
 # ============================================================
@@ -13,12 +19,71 @@ initialize_log("baseline_log.csv")
 SERVER_IP = "127.0.0.1"
 PORT = 5000
 
+# ============================================================
+# NETWORK QUALITY MONITOR
+# ============================================================
 
+NETWORK_CHECK_INTERVAL = 5.0
+
+GOOD_RTT = 50.0
+MODERATE_RTT = 150.0
+
+last_network_check = 0
+network_rtt = 0.0
+network_quality = "GOOD"
+
+
+def measure_network_quality(sock):
+    """
+    Measure RTT using a small message over the existing TCP connection.
+    Returns:
+        rtt_ms, quality
+    """
+
+    try:
+        start = time.perf_counter()
+
+        sock.sendall(b"PING")
+
+        response = sock.recv(4)
+
+        end = time.perf_counter()
+
+        if response != b"PONG":
+            return network_rtt, network_quality
+
+        rtt_ms = (end - start) * 1000.0
+
+        if rtt_ms <= GOOD_RTT:
+            quality = "GOOD"
+
+        elif rtt_ms <= MODERATE_RTT:
+            quality = "MODERATE"
+
+        else:
+            quality = "POOR"
+
+        return rtt_ms, quality
+
+    except Exception:
+        return 999.0, "POOR"
 # ============================================================
 # YOLO
 # ============================================================
 
-MODEL_PATH = "yolo11n.pt"
+import os
+
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
+
+MODEL_PATH = os.path.join(
+    PROJECT_ROOT,
+    "models",
+    "yolo11n.pt"
+)
 CONFIDENCE_THRESHOLD = 0.50
 
 
@@ -394,13 +459,18 @@ while True:
     else:
 
         activity = "IDLE"
-                    # ========================================================
-    # SELECT TIER - BASELINE
+
+
+    # ========================================================
+    # SELECT TIER
     # ========================================================
 
-    # Always use highest-quality tier for baseline measurement
-    tier = 2
+    tier = get_tier(activity)
+    if network_quality == "POOR":
+        tier = max(0, tier - 2)
 
+    elif network_quality == "MODERATE":
+        tier = max(0, tier - 1)
     settings = TIERS[tier]
 
     target_width = settings["width"]
@@ -449,6 +519,41 @@ while True:
 
             bytes_sent = len(data)
 
+            
+
+            message = (
+                struct.pack("Q", len(data))
+                + data
+            )
+               
+            try:
+                send_start = time.perf_counter()
+
+                client_socket.sendall(message)
+
+                # Wait for server acknowledgement
+                ack = client_socket.recv(3)
+
+                if ack == b"ACK":
+                    rtt = (time.perf_counter() - send_start) * 1000
+                else:
+                    rtt = 999.0
+
+                if rtt <= 50:
+                    network_quality = "GOOD"
+                elif rtt <= 150:
+                    network_quality = "MODERATE"
+                else:
+                    network_quality = "POOR"
+
+                print(
+                    f"RTT: {rtt:.2f} ms | "
+                    f"Network: {network_quality}"
+                )
+
+            except ConnectionError:
+                print("Server disconnected.")
+                break    
             log_event(
                 activity=activity,
                 tier=tier,
@@ -456,22 +561,10 @@ while True:
                 height=target_height,
                 fps=target_fps,
                 motion=motion_value,
-                bytes_sent=bytes_sent
-            )
-
-            message = (
-                struct.pack("Q", len(data))
-                + data
-            )
-
-            try:
-                client_socket.sendall(message)
-
-            except ConnectionError:
-
-                print("Server disconnected.")
-                
-
+                bytes_sent=bytes_sent,
+                rtt_ms=rtt,
+                network_quality=network_quality
+            )     
     # ========================================================
     # DISPLAY
     # ========================================================

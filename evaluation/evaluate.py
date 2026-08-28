@@ -3,8 +3,28 @@ import os
 from collections import defaultdict
 
 
-BASELINE_LOG = "baseline_log.csv"
-ADAPTIVE_LOG = "streaming_log.csv"
+import os
+import csv
+from collections import defaultdict
+
+
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(
+        os.path.abspath(__file__)
+    )
+)
+
+BASELINE_LOG = os.path.join(
+    PROJECT_ROOT,
+    "results",
+    "baseline_log.csv"
+)
+
+ADAPTIVE_LOG = os.path.join(
+    PROJECT_ROOT,
+    "results",
+    "streaming_log.csv"
+)
 
 
 # ============================================================
